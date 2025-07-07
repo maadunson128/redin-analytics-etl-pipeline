@@ -1,0 +1,81 @@
+--Create database for the redfin data
+CREATE OR REPLACE DATABASE REDFIN_DATA;
+
+--Select database
+USE DATABASE REDFIN_DATA;
+
+--Create warehouse for current worksheet
+CREATE WAREHOUSE REDFIN_DWH
+    WAREHOUSE_SIZE='XSMALL';
+    
+--CREATE SCHEMA FOR TABLES WHICH HAS THE DATA
+CREATE SCHEMA REDFIN_SCHEMA;
+
+--Insert table into schema redfin_schema
+CREATE TABLE REDFIN_DATA.REDFIN_SCHEMA.REDFIN_TABLE(
+    period_begin DATE,
+    period_end DATE,
+    period_duration INT,
+    region_type STRING,
+    region_type_id INT,
+    table_id INT,
+    is_seasonally_adjusted STRING,
+    city STRING,
+    state STRING,
+    state_code STRING,
+    property_type STRING,
+    property_type_id INT,
+    median_sale_price FLOAT,
+    median_list_price FLOAT,
+    median_ppsf FLOAT,
+    median_list_ppsf FLOAT,
+    homes_sold FLOAT,
+    inventory FLOAT,
+    months_of_supply FLOAT,
+    median_dom FLOAT,
+    avg_sale_to_list FLOAT,
+    sold_above_list FLOAT,
+    parent_metro_region_metro_code STRING,
+    last_updated DATETIME,
+    period_begin_in_years STRING,
+    period_end_in_years STRING,
+    period_begin_in_months STRING,
+    period_end_in_months STRING
+);
+
+--Create fileformat schema 
+CREATE SCHEMA FILE_FORMAT_SCHEMA;
+
+--Create Fileformat database object
+CREATE FILE FORMAT REDFIN_DATA.FILE_FORMAT_SCHEMA.CSV_FORMAT
+    TYPE = CSV
+    RECORD_DELIMITER='\n'
+    FIELD_DELIMITER=','
+    SKIP_HEADER=1;
+    
+--Create schema for external stages
+CREATE SCHEMA REDFIN_DATA.EXTERNAL_STAGE_SCHEMA;
+
+--Create external stage for s3
+CREATE OR ALTER STAGE REDFIN_DATA.EXTERNAL_STAGE_SCHEMA.AWS_S3_STAGE
+    URL='s3://redfin-data-analytics-db/transformed_data/'
+    CREDENTIALS=(AWS_KEY_ID='*************' AWS_SECRET_KEY='*****************'
+    FILE_FORMAT=REDFIN_DATA.FILE_FORMAT_SCHEMA.CSV_FORMAT;
+
+--Seeing where the stage is
+LIST @REDFIN_DATA.EXTERNAL_STAGE_SCHEMA.AWS_S3_STAGE;
+
+--Create schema for snowpipe
+CREATE SCHEMA SNOW_PIPE_SCHEMA;
+
+--Create snowpipe
+CREATE PIPE REDFIN_DATA.SNOW_PIPE_SCHEMA.REDFIN_S3_PIPE
+    AUTO_INGEST=TRUE
+AS
+COPY INTO REDFIN_DATA.REDFIN_SCHEMA.REDFIN_TABLE
+FROM @REDFIN_DATA.EXTERNAL_STAGE_SCHEMA.AWS_S3_STAGE;
+
+
+DESC PIPE REDFIN_DATA.SNOW_PIPE_SCHEMA.REDFIN_S3_PIPE;
+
+SELECT * FROM REDFIN_DATA.REDFIN_SCHEMA.REDFIN_TABLE;

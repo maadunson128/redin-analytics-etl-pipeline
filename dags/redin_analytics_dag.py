@@ -1,9 +1,9 @@
 from airflow import DAG
 from datetime import datetime, timedelta
 from airflow.providers.standard.operators.python import PythonOperator
-from airflow.providers.standard.operators.bash import BashOperator
 import pandas as pd
 import os
+from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
 #url link from redin data center
 url_link = "https://redfin-public-data.s3.us-west-2.amazonaws.com/redfin_market_tracker/city_market_tracker.tsv000.gz"
@@ -22,20 +22,18 @@ def extract_data(**kwargs):
 
 
     """
-
-    
     url=kwargs['url']
 
     #create filename with the timestamp
     datenow_str = datetime.now().strftime('%d%m%Y%H%M%S')
-    file_name = f'redin_data_{datenow_str}'
-    output_filepath = '/home/maadunson/airflow_project/data/'
+    file_name = f'redin_data_{datenow_str}.csv'
+    output_filepath = '/home/maadunson/airflow_project/data/raw/'
     full_path = os.path.join(output_filepath, file_name)
 
     #Extracting the data in chunks
     print("Started to process the file in chunks")
     first_chunk = True
-    for chunk in pd.read_csv(url, compression='gzip', sep='\t', chunksize=5000):
+    for chunk in pd.read_csv(url, compression='gzip', sep='\t', chunksize=3000):
         chunk.to_csv(
             full_path,
             mode='w' if first_chunk else 'a',
@@ -62,22 +60,26 @@ def transform_data(**kwargs):
 
     """
 
-    ti = kwargs['ti']
-    file_info = ti.xcom_pull(task_ids='extract_data_redfin')
+    # file_info = kwargs['ti'].xcom_pull(task_ids='extract_data_redfin')
+    # file_name = file_info[0]
+    # file_path = file_info[1]
 
-    file_name, file_path = file_info
+    #temporary testing variables
+    file_name = 'redin_data_07072025102753.csv'
+    file_path = '/home/maadunson/airflow_project/data/raw/'
+    output_file_path = '/home/maadunson/airflow_project/data/transformed/'
     input_file = os.path.join(file_path, file_name)
 
     #create output file name
-    transformed_file_name = file_name.replace('.csv, _transformed.csv')
-    output_file = os.path.join(file_path, file_name)
+    transformed_file_name = file_name + '_trasformed_data.csv'
+    output_file = os.path.join(output_file_path, transformed_file_name)
 
     #define columns to keep only
-    cols = ['period_begin','period_end','period_duration', 'region_type', 'region_type_id', 'table_id',
-            'is_seasonally_adjusted', 'city', 'state', 'state_code', 'property_type', 'property_type_id',
-            'median_sale_price', 'median_list_price', 'median_ppsf', 'median_list_ppsf', 'homes_sold',
-            'inventory', 'months_of_supply', 'median_dom', 'avg_sale_to_list', 'sold_above_list', 
-            'parent_metro_region_metro_code', 'last_updated']
+    cols = ['PERIOD_BEGIN','PERIOD_END','PERIOD_DURATION', 'REGION_TYPE', 'REGION_TYPE_ID', 'TABLE_ID',
+            'IS_SEASONALLY_ADJUSTED', 'CITY', 'STATE', 'STATE_CODE', 'PROPERTY_TYPE', 'PROPERTY_TYPE_ID',
+            'MEDIAN_SALE_PRICE', 'MEDIAN_LIST_PRICE', 'MEDIAN_PPSF', 'MEDIAN_LIST_PPSF', 'HOMES_SOLD',
+            'INVENTORY', 'MONTHS_OF_SUPPLY', 'MEDIAN_DOM', 'AVG_SALE_TO_LIST', 'SOLD_ABOVE_LIST', 
+            'PARENT_METRO_REGION_METRO_CODE', 'LAST_UPDATED']
     
     #Months mapping
     month_dict = {
@@ -91,10 +93,10 @@ def transform_data(**kwargs):
 
     #Transforming the data in chunks
     first_chunk = True
-    for chunk in pd.read_csv(input_file, chunksize=3000):
+    for chunk in pd.read_csv(input_file, sep=',', chunksize=3000):
         
         #removing commas in city column
-        chunk['city'] = chunk['city'].str.replace(',', '', regex=False)
+        chunk['CITY'] = chunk['CITY'].str.replace(',', '', regex=False)
         
         #select only needed columns
         chunk = chunk[cols]
@@ -103,18 +105,21 @@ def transform_data(**kwargs):
         chunk = chunk.dropna()
 
         #converting to datetime format 
-        chunk['period_begin'] = pd.to_datetime(chunk['period_begin'], errors='coerce')
-        chunk['period_end'] = pd.to_datetime(chunk['period_end'], errors='coerce')
+        chunk['PERIOD_BEGIN'] = pd.to_datetime(chunk['PERIOD_BEGIN'], format='%Y-%m-%d', errors='coerce') #2023-10-01
+        chunk['PERIOD_END'] = pd.to_datetime(chunk['PERIOD_END'], format='%Y-%m-%d', errors='coerce')
+        
+        #remove rows where datetime conversion failed (including header rows)
+        chunk = chunk.dropna(subset=['PERIOD_BEGIN', 'PERIOD_END'])
 
         #creating new columns by extracting years, and months
-        chunk['period_begin_in_years'] = chunk['period_begin'].dt.year
-        chunk['period_begin_in_months'] = chunk['period_begin'].dt.month
-        chunk['period_end_in_years'] = chunk['period_end'].dt.year
-        chunk['period_end_in_months'] = chunk['period_end'].dt.month
+        chunk['PERIOD_BEGIN_IN_YEARS'] = chunk['PERIOD_BEGIN'].dt.year
+        chunk['PERIOD_BEGIN_IN_MONTHS'] = chunk['PERIOD_BEGIN'].dt.month
+        chunk['PERIOD_END_IN_YEARS'] = chunk['PERIOD_END'].dt.year
+        chunk['PERIOD_END_IN_MONTHS'] = chunk['PERIOD_END'].dt.month
 
         #Map months columns to month names
-        chunk['period_begin_in_months'] = chunk['period_begin_in_months'].map(month_dict)
-        chunk['period_end_in_months'] = chunk['period_end_in_months'].map(month_dict)
+        chunk['PERIOD_BEGIN_IN_MONTHS'] = chunk['PERIOD_BEGIN_IN_MONTHS'].map(month_dict)
+        chunk['PERIOD_END_IN_MONTHS'] = chunk['PERIOD_END_IN_MONTHS'].map(month_dict)
 
         #save transformed data
         chunk.to_csv(
@@ -131,9 +136,64 @@ def transform_data(**kwargs):
     return [transformed_file_name, output_file]
 
 
+def load_data(**kwargs):
+    """
+    Function for loading the raw and transformed data to AWS s3
 
-def delete_files():
-    pass
+    Args:
+        url: 
+
+    Returns:
+        None: returns nothing
+    """
+    # file info 
+    #file_info = kwargs['ti'].xcom_pull(task_ids='transform_raw_data_load_s3')
+
+    #temporary testing value
+    file_info = ['redin_data_07072025102753.csv_trasformed_data.csv', '/home/maadunson/airflow_project/data/transformed']
+    transform_file_name = file_info[0]
+    transform_file_path = file_info[1]
+    upload_path = os.path.join(transform_file_path, transform_file_name)
+
+    #initialise s3 Hook with connection
+    s3_hook = S3Hook(aws_conn_id='aws_connector')
+
+    #bucket details
+    bucket_name = "redfin-data-analytics-db"
+    s3_key_transform = f"transformed_data/{transform_file_name}"
+
+    #upload to s3 buckets
+    s3_hook.load_file(
+        upload_path,
+        s3_key_transform,
+        bucket_name,
+        replace=True
+    )
+
+
+def delete_files(**kwargs):
+    """
+    Function for deleting the local raw and transformed data
+
+    Args:
+        :
+
+    Returns:
+        None: returns nothing
+    """
+    # raw_file_info = kwargs['ti'].xcom_pull(task_ids='extract_data_redfin')
+    # transform_file_info = kwargs['ti'].xcom_pull(task_ids='transform_raw_data_load_s3')
+
+    raw_file_info = ['/home/maadunson/airflow_project/data/raw/', 'redin_data_07072025102753.csv']
+    transform_file_info = ['/home/maadunson/airflow_project/data/transformed/', 'redin_data_07072025102753.csv_trasformed_data.csv']
+    raw_file_path = os.path.join(raw_file_info[0], raw_file_info[1])
+    transform_file_path = os.path.join(transform_file_info[0], transform_file_info[1])
+
+    #removing the files
+    os.remove(raw_file_path)
+    os.remove(transform_file_path)
+
+
 
 #creating DAG
 with DAG(
@@ -159,10 +219,10 @@ with DAG(
         python_callable=transform_data  #python function to write and update
     )
 
-    # load_s3 = BashOperator(
-    #     task_id="load_data_s3",
-    #     bash_command="path_to_script.sh"  # script to write and update here, also it first deletes the data in the s3 bucket
-    # )
+    load_s3 = PythonOperator(
+        task_id="load_data_s3",
+        python_callable=load_data,
+    )
 
     delete_local_files = PythonOperator(
         task_id="delete_local_files",
@@ -170,8 +230,5 @@ with DAG(
     )
 
     
-
-
-
-    # extract_redfin_data >> transform_load_data >> load_raw_s3
+    extract_redfin_data >> transform_load_data >> load_s3 >> delete_local_files
 
