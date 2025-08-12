@@ -83,7 +83,8 @@ This project automates the process of extracting real estate market data from an
 ---
 ## Airflow DAG Diagram
 
-<img width="778" height="632" alt="Image" src="https://github.com/user-attachments/assets/a705c830-05d9-4743-aa62-6ee6dbdebf54" />
+<img width="759" height="176" alt="Image" src="https://github.com/user-attachments/assets/5896d707-d3cc-43bf-be04-00e00bd6d0a1" />
+
 ---
 
 ## Why Use Pandas Chunk Processing?
