@@ -26,9 +26,7 @@ This project automates the process of extracting real estate market data from an
 
 ## Architecture Diagram
 
-*Below is a placeholder for the architecture diagram. Please attach the image of your pipeline architecture here.*
-
-<img width="4632" height="2368" alt="Image" src="https://github.com/user-attachments/assets/63f98ab8-51e3-4c2c-8a31-5842f432f497" />
+<img width="4632" height="2460" alt="Image" src="https://github.com/user-attachments/assets/78dfc688-f0f6-4ed5-9262-1afa50615d5e" />
 
 ---
 
