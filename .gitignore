@@ -1,0 +1,81 @@
+# Environment variables (CRITICAL - prevents credential exposure)
+.env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+.env.development
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
+.ENV/
+
+# Airflow
+airflow.cfg
+airflow.db
+logs/
+airflow-webserver.pid
+standalone_admin_password.txt
+
+# AWS credentials
+.aws/
+*.pem
+*.key
+
+# Data files (often large and sensitive)
+data/
+*.csv
+*.tsv
+*.json
+*.parquet
+*.gz
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
