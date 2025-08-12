@@ -4,9 +4,16 @@ from airflow.providers.standard.operators.python import PythonOperator
 import pandas as pd
 import os
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+from dotenv import load_dotenv
 
-#url link from redin data center
-url_link = "https://redfin-public-data.s3.us-west-2.amazonaws.com/redfin_market_tracker/city_market_tracker.tsv000.gz"
+#loading env. variables to the environment 
+load_dotenv('../.env')
+
+#get environment variables
+url_link = os.getenv('URL_LINK')
+raw_output_file_path = os.getenv('RAW_DATA_PATH')
+transform_output_file_path = os.getenv('TRANSFORMED_DATA_PATH')
+s3_bucket_name = os.getenv('S3_BUCKET_NAME')
 
 
 #extracting the refin data
@@ -27,7 +34,7 @@ def extract_data(**kwargs):
     #create filename with the timestamp
     datenow_str = datetime.now().strftime('%d%m%Y%H%M%S')
     file_name = f'redin_data_{datenow_str}.csv'
-    output_filepath = '/home/maadunson/airflow_project/data/raw/'
+    output_filepath = kwargs['op_filepath']
     full_path = os.path.join(output_filepath, file_name)
 
     #Extracting the data in chunks
@@ -60,14 +67,11 @@ def transform_data(**kwargs):
 
     """
 
-    # file_info = kwargs['ti'].xcom_pull(task_ids='extract_data_redfin')
-    # file_name = file_info[0]
-    # file_path = file_info[1]
-
-    #temporary testing variables
-    file_name = 'redin_data_07072025102753.csv'
-    file_path = '/home/maadunson/airflow_project/data/raw/'
-    output_file_path = '/home/maadunson/airflow_project/data/transformed/'
+    #variables needed for the task
+    file_info = kwargs['ti'].xcom_pull(task_ids='extract_data_redfin')
+    file_name = file_info[0]
+    file_path = file_info[1]
+    output_file_path = kwargs['op_transformed_path']
     input_file = os.path.join(file_path, file_name)
 
     #create output file name
@@ -135,6 +139,26 @@ def transform_data(**kwargs):
 
     return [transformed_file_name, output_file]
 
+def delete_existing_data(**kwargs):
+    """
+    Function that will delete the existing data in the s3 bucket for new data uplaoding
+    """
+
+    #creating s3 hook
+    s3_hook = S3Hook(aws_conn_id='aws_connector')
+
+    bucket = kwargs['bucket_name']
+
+    #list files in the bucket
+    keys = s3_hook.list_keys(bucket)
+
+    #deleting the old files before loading the data
+    s3_hook.delete_objects(
+        bucket,
+        keys
+    )
+
+
 
 def load_data(**kwargs):
     """
@@ -146,11 +170,9 @@ def load_data(**kwargs):
     Returns:
         None: returns nothing
     """
-    # file info 
-    #file_info = kwargs['ti'].xcom_pull(task_ids='transform_raw_data_load_s3')
 
-    #temporary testing value
-    file_info = ['redin_data_07072025102753.csv_trasformed_data.csv', '/home/maadunson/airflow_project/data/transformed']
+    #file info 
+    file_info = kwargs['ti'].xcom_pull(task_ids='transform_raw_data_load_s3')
     transform_file_name = file_info[0]
     transform_file_path = file_info[1]
     upload_path = os.path.join(transform_file_path, transform_file_name)
@@ -159,7 +181,7 @@ def load_data(**kwargs):
     s3_hook = S3Hook(aws_conn_id='aws_connector')
 
     #bucket details
-    bucket_name = "redfin-data-analytics-db"
+    bucket_name = kwargs['bucket_name']
     s3_key_transform = f"transformed_data/{transform_file_name}"
 
     #upload to s3 buckets
@@ -181,12 +203,11 @@ def delete_files(**kwargs):
     Returns:
         None: returns nothing
     """
-    # raw_file_info = kwargs['ti'].xcom_pull(task_ids='extract_data_redfin')
-    # transform_file_info = kwargs['ti'].xcom_pull(task_ids='transform_raw_data_load_s3')
 
-    raw_file_info = ['/home/maadunson/airflow_project/data/raw/', 'redin_data_07072025102753.csv']
-    transform_file_info = ['/home/maadunson/airflow_project/data/transformed/', 'redin_data_07072025102753.csv_trasformed_data.csv']
-    raw_file_path = os.path.join(raw_file_info[0], raw_file_info[1])
+    #file details retriving using task instance
+    raw_file_info = kwargs['ti'].xcom_pull(task_ids='extract_data_redfin')
+    transform_file_info = kwargs['ti'].xcom_pull(task_ids='transform_raw_data_load_s3')
+    raw_file_path = os.path.join(raw_file_info[1], raw_file_info[0])
     transform_file_path = os.path.join(transform_file_info[0], transform_file_info[1])
 
     #removing the files
@@ -211,24 +232,32 @@ with DAG(
     extract_redfin_data = PythonOperator(
         task_id="extract_data_redfin",
         python_callable=extract_data,  #python function to write and update
-        op_kwargs={'url': url_link}
+        op_kwargs={'url': url_link, 'op_filepath': raw_output_file_path}
     )
 
     transform_load_data = PythonOperator(
         task_id="transform_raw_data_load_s3",
-        python_callable=transform_data  #python function to write and update
+        python_callable=transform_data,
+        op_kwargs = {'op_transformed_path':transform_output_file_path}  #python function to write and update
+    )
+
+    delete_s3_data = PythonOperator(
+        task_id = "delete_aws_s3_files",
+        python_callable=delete_existing_data,
+        op_kwargs={'bucket_name': s3_bucket_name} #python function to delete existing data
     )
 
     load_s3 = PythonOperator(
         task_id="load_data_s3",
-        python_callable=load_data,
+        python_callable=load_data, # python function to load the data to s3
+        op_kwargs={'bucket_name': s3_bucket_name}
     )
 
     delete_local_files = PythonOperator(
         task_id="delete_local_files",
-        python_callable=delete_files
+        python_callable=delete_files #delete local new data
     )
 
     
-    extract_redfin_data >> transform_load_data >> load_s3 >> delete_local_files
+    extract_redfin_data >> transform_load_data >> delete_s3_data >>load_s3 >> delete_local_files
 
